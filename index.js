@@ -1,6 +1,6 @@
-const express = require("express");
-const axios = require("axios");
-const ical = require("node-ical");
+import express from "express";
+import axios from "axios";
+import ical from "ical.js";
 
 const ICS_URL = process.env.ICS_URL;
 if (!ICS_URL) {
@@ -11,16 +11,15 @@ if (!ICS_URL) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/agenda-today", async (req, res) => {
+app.get("/agenda-today", async (_req, res) => {
   try {
     // 1) Récupération du flux ICS
-    const response = await axios.get(ICS_URL);
-    const rawIcs = response.data;
+    const { data: rawIcs } = await axios.get(ICS_URL);
 
     // 2) Parsing
-    const data = ical.parseICS(rawIcs);
+    const parsed = ical.parseICS(rawIcs);
 
-    // 3) Bornes unix (en secondes) pour "aujourd’hui"
+    // 3) Définition de "aujourd'hui" en timestamp UNIX (secondes)
     const now = new Date();
     const startOfDay = Math.floor(
       new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() /
@@ -31,28 +30,25 @@ app.get("/agenda-today", async (req, res) => {
         1000
     );
 
-    // 4) Filtrage + formatage
-    const events = [];
-    for (const key in data) {
-      const ev = data[key];
-      if (ev.type === "VEVENT") {
-        const dtStart = Math.floor(new Date(ev.start).getTime() / 1000);
-        const dtEnd = Math.floor(new Date(ev.end).getTime() / 1000);
-        if (dtStart >= startOfDay && dtStart < endOfDay) {
-          events.push({ start: dtStart, end: dtEnd, title: ev.summary });
-        }
-      }
-    }
+    // 4) Filtrage des VEVENT du jour
+    const events = Object.values(parsed)
+      .filter((ev) => ev.type === "VEVENT")
+      .map((ev) => {
+        const start = Math.floor(new Date(ev.start).getTime() / 1000);
+        const end = Math.floor(new Date(ev.end).getTime() / 1000);
+        return { start, end, title: ev.summary || "" };
+      })
+      .filter((e) => e.start >= startOfDay && e.start < endOfDay)
+      .sort((a, b) => a.start - b.start);
 
-    // 5) Tri chronologique et envoi
-    events.sort((a, b) => a.start - b.start);
+    // 5) Envoi du JSON
     res.json(events);
   } catch (err) {
-    console.error("Erreur lors de la récupération ou du parsing ICS :", err);
+    console.error("❌ Erreur ICS :", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Agenda service démarré sur le port ${PORT}`);
-});
+app.listen(PORT, () =>
+  console.log(`✅ Agenda service démarré sur http://localhost:${PORT}`)
+);
