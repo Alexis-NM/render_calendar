@@ -1,6 +1,6 @@
 import express from "express";
 import axios from "axios";
-import ical from "ical.js";
+import ICAL from "ical.js";
 
 const ICS_URL = process.env.ICS_URL;
 if (!ICS_URL) {
@@ -13,13 +13,13 @@ const PORT = process.env.PORT || 3000;
 
 app.get("/agenda-today", async (_req, res) => {
   try {
-    // 1) Récupération du flux ICS
+    // 1) Récupère le .ics
     const { data: rawIcs } = await axios.get(ICS_URL);
-
-    // 2) Parsing
-    const parsed = ical.parseICS(rawIcs);
-
-    // 3) Définition de "aujourd'hui" en timestamp UNIX (secondes)
+    // 2) Parse avec ical.js
+    const jcal = ICAL.parse(rawIcs);
+    const comp = new ICAL.Component(jcal);
+    const vevents = comp.getAllSubcomponents("vevent");
+    // 3) Bornes UNIX pour "aujourd'hui"
     const now = new Date();
     const startOfDay = Math.floor(
       new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() /
@@ -29,19 +29,19 @@ app.get("/agenda-today", async (_req, res) => {
       new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() /
         1000
     );
-
-    // 4) Filtrage des VEVENT du jour
-    const events = Object.values(parsed)
-      .filter((ev) => ev.type === "VEVENT")
-      .map((ev) => {
-        const start = Math.floor(new Date(ev.start).getTime() / 1000);
-        const end = Math.floor(new Date(ev.end).getTime() / 1000);
-        return { start, end, title: ev.summary || "" };
+    // 4) Transforme + filtre
+    const events = vevents
+      .map((ve) => {
+        const e = new ICAL.Event(ve);
+        return {
+          start: Math.floor(e.startDate.toJSDate().getTime() / 1000),
+          end: Math.floor(e.endDate.toJSDate().getTime() / 1000),
+          title: e.summary,
+        };
       })
       .filter((e) => e.start >= startOfDay && e.start < endOfDay)
       .sort((a, b) => a.start - b.start);
-
-    // 5) Envoi du JSON
+    // 5) Envoi
     res.json(events);
   } catch (err) {
     console.error("❌ Erreur ICS :", err);
